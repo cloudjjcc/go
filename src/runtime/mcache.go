@@ -35,9 +35,11 @@ type mcache struct {
 	//
 	// tinyAllocs is the number of tiny allocations performed
 	// by the P that owns this mcache.
+	/*tiny 分配器******************************************************/
 	tiny       uintptr
 	tinyoffset uintptr
 	tinyAllocs uintptr
+	/*tiny 分配器******************************************************/
 
 	// The rest is not accessed on every malloc.
 
@@ -81,6 +83,7 @@ type stackfreelist struct {
 // dummy mspan that contains no free objects.
 var emptymspan mspan
 
+// 分配mcache
 func allocmcache() *mcache {
 	var c *mcache
 	systemstack(func() {
@@ -220,7 +223,7 @@ func (c *mcache) allocLarge(size uintptr, needzero bool, noscan bool) *mspan {
 	// pays the debt down to npage pages.
 	deductSweepCredit(npages*_PageSize, npages)
 
-	spc := makeSpanClass(0, noscan)
+	spc := makeSpanClass(0, noscan) //id 为0的特殊跨度类，管理>32kb对象
 	s := mheap_.alloc(npages, spc, needzero)
 	if s == nil {
 		throw("out of memory")

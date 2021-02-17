@@ -81,9 +81,9 @@ var modinfo string
 // for nmspinning manipulation.
 
 var (
-	m0           m
-	g0           g
-	mcache0      *mcache
+	m0           m       //主线程
+	g0           g       //主线程绑定的g
+	mcache0      *mcache //在mallocinit 中被初始化
 	raceprocctx0 uintptr
 )
 
@@ -632,14 +632,21 @@ func schedinit() {
 
 	moduledataverify()
 	stackinit()
+	// 初始化内存分配
 	mallocinit()
+	// 初始化随机数种子
 	fastrandinit() // must run before mcommoninit
+	// ?
 	mcommoninit(_g_.m, -1)
-	cpuinit()       // must run before alginit
-	alginit()       // maps must not be used before this call
+	cpuinit() // must run before alginit
+	// 初始化AES算法
+	alginit() // maps must not be used before this call
+
+	/*插件系统相关**********************************************************/
 	modulesinit()   // provides activeModules
 	typelinksinit() // uses maps, activeModules
 	itabsinit()     // uses activeModules
+	/********************************************************************/
 
 	sigsave(&_g_.m.sigmask)
 	initSigmask = _g_.m.sigmask
@@ -740,7 +747,7 @@ func mcommoninit(mp *m, id int64) {
 	if mp.fastrand[0]|mp.fastrand[1] == 0 {
 		mp.fastrand[1] = 1
 	}
-
+	// 初始化gsignal
 	mpreinit(mp)
 	if mp.gsignal != nil {
 		mp.gsignal.stackguard1 = mp.gsignal.stack.lo + _StackGuard
@@ -3110,6 +3117,7 @@ top:
 		// Check the global runnable queue once in a while to ensure fairness.
 		// Otherwise two goroutines can completely occupy the local runqueue
 		// by constantly respawning each other.
+		//从全局队列获取
 		if _g_.m.p.ptr().schedtick%61 == 0 && sched.runqsize > 0 {
 			lock(&sched.lock)
 			gp = globrunqget(_g_.m.p.ptr(), 1)
@@ -3117,6 +3125,7 @@ top:
 		}
 	}
 	if gp == nil {
+		// 从本地队列获取
 		gp, inheritTime = runqget(_g_.m.p.ptr())
 		// We can see gp != nil here even if the M is spinning,
 		// if checkTimers added a local goroutine via goready.
@@ -3196,7 +3205,7 @@ func checkTimers(pp *p, now int64) (rnow, pollUntil int64, ran bool) {
 		next = nextAdj
 	}
 
-	if next == 0 {
+	if next == 0 { //没有定时器需要运行或调整
 		// No timers to run or adjust.
 		return now, 0, false
 	}
@@ -3209,6 +3218,7 @@ func checkTimers(pp *p, now int64) (rnow, pollUntil int64, ran bool) {
 		// if we would clear deleted timers.
 		// This corresponds to the condition below where
 		// we decide whether to call clearDeletedTimers.
+		// 下一个定时器没有到期或者需要删除的定时器较少
 		if pp != getg().m.p.ptr() || int(atomic.Load(&pp.deletedTimers)) <= int(atomic.Load(&pp.numTimers)/4) {
 			return now, next, false
 		}
@@ -3941,11 +3951,11 @@ func syscall_runtime_AfterExec() {
 
 // Allocate a new g, with a stack big enough for stacksize bytes.
 func malg(stacksize int32) *g {
-	newg := new(g)
+	newg := new(g) //分配一个新的g
 	if stacksize >= 0 {
 		stacksize = round2(_StackSystem + stacksize)
 		systemstack(func() {
-			newg.stack = stackalloc(uint32(stacksize))
+			newg.stack = stackalloc(uint32(stacksize)) //在g0中分配栈
 		})
 		newg.stackguard0 = newg.stack.lo + _StackGuard
 		newg.stackguard1 = ^uintptr(0)
@@ -3972,14 +3982,16 @@ func malg(stacksize int32) *g {
 //
 //go:nosplit
 func newproc(siz int32, fn *funcval) {
+	// 找到参数地址
 	argp := add(unsafe.Pointer(&fn), sys.PtrSize)
 	gp := getg()
+	// 获取调用者pc
 	pc := getcallerpc()
 	systemstack(func() {
-		newg := newproc1(fn, argp, siz, gp, pc)
+		newg := newproc1(fn, argp, siz, gp, pc) //获取g
 
 		_p_ := getg().m.p.ptr()
-		runqput(_p_, newg, true)
+		runqput(_p_, newg, true) // 放进运行队列（p的队列获取sched的全局队列）
 
 		if mainStarted {
 			wakep()
@@ -3997,9 +4009,9 @@ func newproc(siz int32, fn *funcval) {
 //
 //go:systemstack
 func newproc1(fn *funcval, argp unsafe.Pointer, narg int32, callergp *g, callerpc uintptr) *g {
-	_g_ := getg()
+	_g_ := getg() //从TLS获取当前g
 
-	if fn == nil {
+	if fn == nil { //如果函数值为nil,则panic
 		_g_.m.throwing = -1 // do not dump full stacks
 		throw("go of nil func value")
 	}
@@ -4016,10 +4028,11 @@ func newproc1(fn *funcval, argp unsafe.Pointer, narg int32, callergp *g, callerp
 	}
 
 	_p_ := _g_.m.p.ptr()
-	newg := gfget(_p_)
+	newg := gfget(_p_) //从p的gFree列表中拿g
 	if newg == nil {
-		newg = malg(_StackMin)
-		casgstatus(newg, _Gidle, _Gdead)
+		newg = malg(_StackMin)           // 创建一个新的g(stack=2048)
+		casgstatus(newg, _Gidle, _Gdead) //设置g的状态为dead
+		// 添加到allg切片中，防止gc?
 		allgadd(newg) // publishes with a g->status of Gdead so GC scanner doesn't look at uninitialized stack.
 	}
 	if newg.stack.hi == 0 {
@@ -4029,11 +4042,13 @@ func newproc1(fn *funcval, argp unsafe.Pointer, narg int32, callergp *g, callerp
 	if readgstatus(newg) != _Gdead {
 		throw("newproc1: new g is not Gdead")
 	}
-
+	// 计算使用的栈大小 4个寄存器+参数大小+0
 	totalSize := 4*sys.RegSize + uintptr(siz) + sys.MinFrameSize // extra space in case of reads slightly beyond frame
 	totalSize += -totalSize & (sys.SpAlign - 1)                  // align to spAlign
+	// 计算栈顶指针
 	sp := newg.stack.hi - totalSize
 	spArg := sp
+	// ?
 	if usesLR {
 		// caller's LR
 		*(*uintptr)(unsafe.Pointer(sp)) = 0
@@ -4041,6 +4056,7 @@ func newproc1(fn *funcval, argp unsafe.Pointer, narg int32, callergp *g, callerp
 		spArg += sys.MinFrameSize
 	}
 	if narg > 0 {
+		// 拷贝参数到栈中
 		memmove(unsafe.Pointer(spArg), argp, uintptr(narg))
 		// This is a stack-to-stack copy. If write barriers
 		// are enabled and the source stack is grey (the
@@ -4058,12 +4074,13 @@ func newproc1(fn *funcval, argp unsafe.Pointer, narg int32, callergp *g, callerp
 			}
 		}
 	}
-
+	// 初始化g的gobuf（协程上下文信息）
 	memclrNoHeapPointers(unsafe.Pointer(&newg.sched), unsafe.Sizeof(newg.sched))
 	newg.sched.sp = sp
 	newg.stktopsp = sp
 	newg.sched.pc = funcPC(goexit) + sys.PCQuantum // +PCQuantum so that previous instruction is in same function
 	newg.sched.g = guintptr(unsafe.Pointer(newg))
+
 	gostartcallfn(&newg.sched, fn)
 	newg.gopc = callerpc
 	newg.ancestors = saveAncestors(callergp)
@@ -4074,6 +4091,7 @@ func newproc1(fn *funcval, argp unsafe.Pointer, narg int32, callergp *g, callerp
 	if isSystemGoroutine(newg, false) {
 		atomic.Xadd(&sched.ngsys, +1)
 	}
+	// 设置协程状态为_Grunnable
 	casgstatus(newg, _Gdead, _Grunnable)
 
 	if _p_.goidcache == _p_.goidcacheend {
@@ -4168,6 +4186,7 @@ func gfput(_p_ *p, gp *g) {
 
 // Get from gfree list.
 // If local list is empty, grab a batch from global list.
+// 如果p的gFree不为空，则直接拿，否则从全局的gFree中拿
 func gfget(_p_ *p) *g {
 retry:
 	if _p_.gFree.empty() && (!sched.gFree.stack.empty() || !sched.gFree.noStack.empty()) {
@@ -5016,7 +5035,7 @@ func checkdead() {
 			run0 = 1
 		}
 	}
-
+	// 计算正在运行的线程数
 	run := mcount() - sched.nmidle - sched.nmidlelocked - sched.nmsys
 	if run > run0 {
 		return
@@ -5075,6 +5094,7 @@ func checkdead() {
 	}
 
 	// There are no goroutines running, so we can look at the P's.
+	// 存在定时器
 	for _, _p_ := range allp {
 		if len(_p_.timers) > 0 {
 			return
@@ -5099,7 +5119,7 @@ var forcegcperiod int64 = 2 * 60 * 1e9
 func sysmon() {
 	lock(&sched.lock)
 	sched.nmsys++
-	checkdead()
+	checkdead() //死锁检测
 	unlock(&sched.lock)
 
 	// For syscall_runtime_doAllThreadsSyscall, sysmon is
@@ -5227,6 +5247,7 @@ func sysmon() {
 		}
 		// retake P's blocked in syscalls
 		// and preempt long running G's
+		// 抢占调度
 		if retake(now) != 0 {
 			idle = 0
 		} else {
@@ -5762,7 +5783,7 @@ retry:
 		atomic.StoreRel(&_p_.runqtail, t+1) // store-release, makes the item available for consumption
 		return
 	}
-	if runqputslow(_p_, gp, h, t) {
+	if runqputslow(_p_, gp, h, t) { //放到全局队列上
 		return
 	}
 	// the queue is not full, now the put above must succeed

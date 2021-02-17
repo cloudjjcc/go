@@ -153,6 +153,8 @@ type mheap struct {
 	// platforms (even 64-bit), arenaL1Bits is 0, making this
 	// effectively a single-level map. In this case, arenas[0]
 	// will never be nil.
+	// 所有的堆内存二位数组
+	// [一维索引][二维索引]
 	arenas [1 << arenaL1Bits]*[1 << arenaL2Bits]*heapArena
 
 	// heapArenaAlloc is pre-reserved space for allocating heapArena
@@ -203,6 +205,7 @@ type mheap struct {
 	// spaced CacheLinePadSize bytes apart, so that each mcentral.lock
 	// gets its own cache line.
 	// central is indexed by spanClass.
+	// 所有的全局中心缓存
 	central [numSpanClasses]struct {
 		mcentral mcentral
 		pad      [cpu.CacheLinePadSize - unsafe.Sizeof(mcentral{})%cpu.CacheLinePadSize]byte
@@ -380,12 +383,15 @@ type mSpanList struct {
 
 //go:notinheap
 type mspan struct {
+	// 双向链表
 	next *mspan     // next span in list, or nil if none
 	prev *mspan     // previous span in list, or nil if none
 	list *mSpanList // For debugging. TODO: Remove.
 
+	// 起始地址
 	startAddr uintptr // address of first byte of span aka s.base()
-	npages    uintptr // number of pages in span
+	// 页数
+	npages uintptr // number of pages in span
 
 	manualFreeList gclinkptr // list of free objects in mSpanManual spans
 
@@ -439,7 +445,9 @@ type mspan struct {
 	// The sweep will free the old allocBits and set allocBits to the
 	// gcmarkBits. The gcmarkBits are replaced with a fresh zeroed
 	// out memory.
-	allocBits  *gcBits
+	// 标记内存占用
+	allocBits *gcBits
+	// 标记内存释放
 	gcmarkBits *gcBits
 
 	// sweep generation:
@@ -450,11 +458,14 @@ type mspan struct {
 	// if sweepgen == h->sweepgen + 3, the span was swept and then cached and is still cached
 	// h->sweepgen is incremented by 2 after every GC
 
-	sweepgen    uint32
-	divMul      uint16        // for divide by elemsize - divMagic.mul
-	baseMask    uint16        // if non-0, elemsize is a power of 2, & this will get object allocation base
-	allocCount  uint16        // number of allocated objects
-	spanclass   spanClass     // size class and noscan (uint8)
+	sweepgen   uint32
+	divMul     uint16 // for divide by elemsize - divMagic.mul
+	baseMask   uint16 // if non-0, elemsize is a power of 2, & this will get object allocation base
+	allocCount uint16 // number of allocated objects
+
+	// 决定对象大小
+	spanclass spanClass // size class and noscan (uint8)
+
 	state       mSpanStateBox // mSpanInUse etc; accessed atomically (get/set methods)
 	needzero    uint8         // needs to be zeroed before allocation
 	divShift    uint8         // for divide by elemsize - divMagic.shift
@@ -698,6 +709,7 @@ func pageIndexOf(p uintptr) (arena *heapArena, pageIdx uintptr, pageMask uint8) 
 }
 
 // Initialize the heap.
+// 初始化堆
 func (h *mheap) init() {
 	lockInit(&h.lock, lockRankMheap)
 	lockInit(&h.speciallock, lockRankMheapSpecial)

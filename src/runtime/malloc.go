@@ -413,7 +413,7 @@ var (
 // sysFault transitions a memory region from Ready or Prepared to Reserved. It
 // marks a region such that it will always fault if accessed. Used only for
 // debugging the runtime.
-
+//初始化内存分配
 func mallocinit() {
 	if class_to_size[_TinySizeClass] != _TinySize {
 		throw("bad TinySizeClass")
@@ -1054,7 +1054,7 @@ func mallocgc(size uintptr, typ *_type, needzero bool) unsafe.Pointer {
 				c.tinyoffset = size
 			}
 			size = maxTinySize
-		} else {
+		} else { //16<size<32768 小对象分配
 			var sizeclass uint8
 			if size <= smallSizeMax-8 {
 				sizeclass = size_to_class8[divRoundUp(size, smallSizeDiv)]

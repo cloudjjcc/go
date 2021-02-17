@@ -17,6 +17,7 @@ import "runtime/internal/atomic"
 // Central list of free objects of a given size.
 //
 //go:notinheap
+// 全局中心缓存
 type mcentral struct {
 	spanclass spanClass
 

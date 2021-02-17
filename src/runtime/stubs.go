@@ -40,16 +40,11 @@ func mcall(fn func(*g))
 // Otherwise, systemstack is being called from the limited stack
 // of an ordinary goroutine. In this case, systemstack switches
 // to the per-OS-thread stack, calls fn, and switches back.
-// It is common to use a func literal as the argument, in order
-// to share inputs and outputs with the code around the call
-// to system stack:
-//
-//	... set up y ...
 //	systemstack(func() {
 //		x = bigcall(y)
 //	})
 //	... use x ...
-//
+// systemstack函数的作用是在系统栈中执行只能由g0(或gsignal?)执行的调度代码
 //go:noescape
 func systemstack(fn func())
 

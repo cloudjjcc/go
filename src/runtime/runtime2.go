@@ -413,21 +413,22 @@ type g struct {
 	stackguard0 uintptr // offset known to liblink
 	stackguard1 uintptr // offset known to liblink
 
-	_panic       *_panic // innermost panic - offset known to liblink
-	_defer       *_defer // innermost defer
-	m            *m      // current m; offset known to arm liblink
-	sched        gobuf
+	_panic       *_panic        // innermost panic - offset known to liblink
+	_defer       *_defer        // innermost defer
+	m            *m             // current m; offset known to arm liblink
+	sched        gobuf          // 协程上下文
 	syscallsp    uintptr        // if status==Gsyscall, syscallsp = sched.sp to use during gc
 	syscallpc    uintptr        // if status==Gsyscall, syscallpc = sched.pc to use during gc
 	stktopsp     uintptr        // expected sp at top of stack, to check in traceback
 	param        unsafe.Pointer // passed parameter on wakeup
-	atomicstatus uint32
-	stackLock    uint32 // sigprof/scang lock; TODO: fold in to atomicstatus
-	goid         int64
+	atomicstatus uint32         // 协程状态
+	stackLock    uint32         // sigprof/scang lock; TODO: fold in to atomicstatus
+	goid         int64          // 协程ID
 	schedlink    guintptr
 	waitsince    int64      // approx time when the g become blocked
 	waitreason   waitReason // if status==Gwaiting
 
+	// 抢占调度相关
 	preempt       bool // preemption signal, duplicates stackguard0 = stackpreempt
 	preemptStop   bool // transition to _Gpreempted on preemption; otherwise, just deschedule
 	preemptShrink bool // shrink stack at synchronous safe point
@@ -489,11 +490,16 @@ type m struct {
 	divmod  uint32 // div/mod denominator for arm - known to liblink
 
 	// Fields not known to debuggers.
-	procid        uint64       // for debuggers, but offset not hard-coded
-	gsignal       *g           // signal-handling g
-	goSigStack    gsignalStack // Go-allocated signal handling stack
-	sigmask       sigset       // storage for saved signal mask
-	tls           [6]uintptr   // thread-local storage (for x86 extern register)
+
+	/*信号处理相关字段*********************************************************************/
+	/**/
+	procid uint64 // for debuggers, but offset not hard-coded
+	/**/ gsignal *g // signal-handling g  处理系统信号的g
+	/**/ goSigStack gsignalStack // Go-allocated signal handling stack
+	/**/ sigmask sigset // storage for saved signal mask
+	/*********************************************************************************/
+
+	tls           [6]uintptr // thread-local storage (for x86 extern register)
 	mstartfn      func()
 	curg          *g       // current running goroutine
 	caughtsig     guintptr // goroutine running during fatal signal
@@ -501,7 +507,7 @@ type m struct {
 	nextp         puintptr
 	oldp          puintptr // the p that was attached before executing a syscall
 	id            int64
-	mallocing     int32
+	mallocing     int32 //正在进行内存分配
 	throwing      int32
 	preemptoff    string // if != "", keep curg running on this m
 	locks         int32
@@ -581,7 +587,10 @@ type p struct {
 	syscalltick uint32     // incremented on every system call
 	sysmontick  sysmontick // last tick observed by sysmon
 	m           muintptr   // back-link to associated m (nil if idle)
-	mcache      *mcache
+
+	// 线程缓存分配器
+	mcache *mcache
+
 	pcache      pageCache
 	raceprocctx uintptr
 
@@ -593,6 +602,7 @@ type p struct {
 	goidcacheend uint64
 
 	// Queue of runnable goroutines. Accessed without lock.
+	/*goroutine 队列256************************************/
 	runqhead uint32
 	runqtail uint32
 	runq     [256]guintptr
@@ -606,7 +616,7 @@ type p struct {
 	// latency that otherwise arises from adding the ready'd
 	// goroutines to the end of the run queue.
 	runnext guintptr
-
+	/**************************************************************/
 	// Available G's (status == Gdead)
 	gFree struct {
 		gList
@@ -683,6 +693,7 @@ type p struct {
 	// writing any stats. Its value is even when not, odd when it is.
 	statsSeq uint32
 
+	/*定时器相关**************************************************************/
 	// Lock for timers. We normally access the timers while running
 	// on this P, but the scheduler can also do it from a different P.
 	timersLock mutex
@@ -708,6 +719,7 @@ type p struct {
 
 	// Race context used while executing timer functions.
 	timerRaceCtx uintptr
+	/*定时器相关**************************************************************/
 
 	// preempt is set to indicate that this P should be enter the
 	// scheduler ASAP (regardless of what G is running on it).
